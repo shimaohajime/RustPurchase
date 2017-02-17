@@ -191,7 +191,8 @@ class SimulateDynShare:
             share_obs[i] = buy_obs/self.N_cons
         self.share_obs = share_obs
         
-        self.data = {'char':self.char,'share':share_obs}
+        self.data = {'prodid':self.prodid,'mktid':self.mktid,'loc_firstobs':self.loc_firstobs,'loc_lastobs':self.loc_lastobs,\
+        'states_def':self.states_def,'char':self.char,'share':share_obs}
 
         
        
