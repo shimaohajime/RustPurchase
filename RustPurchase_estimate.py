@@ -54,15 +54,6 @@ def Gen_states_def(phi, v_var,S_gridN,S_gridmin,S_gridmax,S_grid,\
     return states_def
 
 
-def value_to_share(zeta, EV_grid):
-    
-
-def choice_prob(val): #input 2 by S_gridN matrix
-    n,s = val.shape
-    expval = np.exp(val)
-    expval_sum = np.tile(  np.sum(expval, axis=0), n).reshape([n,s])
-    p_choice = expval/expval_sum
-    return p_choice
 
 def contraction_mapping(beta,\
                         S_gridN,S_gridmin,S_gridmax,S_grid,\
@@ -88,8 +79,53 @@ def contraction_mapping(beta,\
         norm = np.max(np.abs(EV_new - EV))
     return EV_new, U_myopic
 
+def Calc_share_hat(zeta_seq, zeta_grid, EV_grid, beta):
+    nobs = len(zeta_seq)
+    val_grid = np.c_[np.zeros(nobs), zeta_grid] + beta*EV_grid
+    pchoice_grid = choice_prob(val_grid)
+    pchoice_seq = pchoice_grid[:,zeta_seq]
+    
+    share_hat = np.zeros(nobs)
+    for i in range(nobs):
+        if loc_firstobs[i]:
+            remain = 1.
+        share_hat = remain*pchoice_seq[1,i]
+        remain = remain-share_obs
+    return share_hat
+    
+def choice_prob(val): #input 2 by S_gridN matrix
+    n,s = val.shape
+    expval = np.exp(val)
+    expval_sum = np.tile(  np.sum(expval, axis=0), n).reshape([n,s])
+    p_choice = expval/expval_sum
+    return p_choice
 
-def FP_zeta(share_obs, phi_guess, v_var_guess, S_gridN,S_gridmin,S_gridmax,S_grid,S_grid_bounds,S_gridsize):
+
+def FP_zeta(share_obs, phi_guess, v_var_guess,\
+            EV_grid,
+            S_gridN,S_gridmin,S_gridmax,S_grid,S_grid_bounds,S_gridsize,\
+            beta,\
+            threshold=1e-6, maxiter=10e3):
+    nobs = len(share_obs)
+    zeta_hat = 5.*np.ones(nobs)
+    zeta_hat_new = 5.*np.ones(nobs)
+    norm = 100.
+    while norm>threshold:    
+        zeta_hat = zeta_hat_new
+        share_hat = Calc_share_hat(zeta_hat,S_grid, EV_grid, beta)
+        update = np.log(share_obs)-np.log(share_hat)
+        zeta_hat_new = zeta_hat+update
+        norm = np.max( np.abs(zeta_hat_new-zeta_hat) )
+    return zeta_hat
+
+def Unpdate_phi():
+    pass
+
+def Calc_eta():
+    pass
+
+def Calc_nu():
+    pass
     
     
     
