@@ -57,7 +57,14 @@ class EstimateDynShare:
         self.loc_firstobs = data['loc_firstobs']
         self.loc_lastobs = data['loc_lastobs']
         self.mktid = data['mktid']
+        self.age = data['age']
         self.prodid = data['prodid']
+        self.nobs = len(self.share_obs)
+        try:
+            self.iv_nu_other = data['iv_nu_other']
+        except KeyError:
+            self.iv_nu_other = None
+
 
     def Gen_states_def(self,phi, v_var,S_gridN,S_gridmin,S_gridmax,S_grid,\
         S_grid_bounds,S_gridsize):
@@ -200,12 +207,13 @@ class EstimateDynShare:
         f=np.dot(np.dot(temp5/nobs, invA),(temp5.T)/nobs)
         return bhat, f
     
-    def Calc_gmm(self, nu, iv_nu, W=None):
-        n_nu = len(nu)
-        nu=nu.reshape([n_nu,-1])
-        nu_fd = nu[1:]-nu[:-1]
+    def Calc_gmm(self, nu_short, iv_nu, W=None):
+        nobs_nu = len(nu_short)
+        nobs_iv_nu = iv_nu.shape[0]               
+        nu=nu_short.reshape([nobs_nu,-1])
+        nu_fd = nu_short[1:]-nu_short[:-1]
         iv_nu_lagged = iv_nu[1:,:]
-        nu_comb = np.vstack((nu,nu_fd) )
+        nu_comb = np.vstack((nu_short, nu_fd) )
         iv_comb = np.vstack( (iv_nu, iv_nu_lagged) )
         n_iv = iv_comb.shape[1]
         if W is None:
@@ -215,7 +223,11 @@ class EstimateDynShare:
         return gmm
     
     def Create_iv_nu(zeta_seq):
-        
+        zeta_lag1=zeta_seq[~self.loc_lastobs]
+        zeta_lag2=zeta_seq[~self.loc_lastobs2]
+        iv_nu = np.c_[zeta_lag1[~self.loc_firstobs],zeta_lag2]
+        if self.iv_nu_other is not None:
+            iv_nu = np.c_[iv_nu,iv_nu_other]
         return iv_nu
         
     def make_gmmobj(self):
@@ -229,11 +241,15 @@ class EstimateDynShare:
             phi_guess,eta_seq = self.Update_phi(zeta_seq=zeta_hat,x=self.char,iv_phi=self.iv_phi)
             iv_rho = self.Create_iv_rho(zeta_seq=zeta_hat)
             rho_guess, nu_seq = self.Update_rho(eta_seq=eta_seq)
+            nu_short = nu[((1-self.firstobs)*(1-self.firstobs2)).astype(bool)]
             f = self.Calc_gmm(nu,iv_nu=iv_nu)
             return f
         return gmmobj
     
     def fit(self):
         self.iv_phi = 
-        
+        self.loc_firstobs2 = 
+        self.loc_lastobs2 = 
+        if self.iv_nu_other is not None and self.iv_nu_other.shape[0]==self.nobs:
+            self.iv_nu_other = self.iv_nu_other[((1-self.firstobs)*(1-self.firstobs2)).astype(bool)]
         

@@ -36,6 +36,7 @@ class SimulateDynShare:
         self.nobs=T*nprod
         self.prodid = np.repeat(np.arange(nprod),T)
         self.mktid = np.tile( np.arange(T),nprod )
+        self.age = np.tile( np.arange(T),nprod )
         self.loc_firstobs = np.append( True, self.prodid[1:]!=self.prodid[:-1] )
         self.loc_lastobs = np.append( self.prodid[1:]!=self.prodid[:-1], True )
         self.N_cons=N_cons
@@ -192,7 +193,7 @@ class SimulateDynShare:
         self.valid_data=valid_data
         
         self.data = {'prodid':self.prodid[valid_data],'mktid':self.mktid[valid_data],'loc_firstobs':self.loc_firstobs[valid_data],'loc_lastobs':self.loc_lastobs[valid_data],\
-        'states_def':self.states_def,'char':self.char[valid_data,:],'share':share_obs[valid_data]}
+        'states_def':self.states_def,'char':self.char[valid_data,:],'share':share_obs[valid_data],'age':self.age[valid_data]}
         
         self.data_unobs = {'S_real':S_real[valid_data],'zeta_real':zeta_real[valid_data],'phi':phi,'v_var':v_var,'EV_grid':EV_grid,\
                            'U_myopic':U_myopic,'pchoice_seq':pchoice_seq[:,valid_data]}
