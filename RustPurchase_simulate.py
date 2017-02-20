@@ -20,7 +20,7 @@ import sys
 
 class SimulateDynShare:
     def __init__(self, S_gridN = 3,S_gridmin = -1.,S_gridmax = 1.,\
-                 T=10,N_cons=10000,nprod=5,nchar=3,\
+                 T=10,N_cons=100000,nprod=5,nchar=3,\
                  dpara=np.ones(3) , beta=.75,mean_x=0.,var_x=1.,cov_x=0.,nu_var = 1.,rho = .8,\
                  flag_char_dyn=1):
         
@@ -165,23 +165,21 @@ class SimulateDynShare:
         phi, v_var = self.Calc_phi(zeta_real)
         
         self.states_def=self.Gen_states_def(phi,v_var,**self.S_setting)
-        #Calculate choice probability    
+        #Calculate choice probability
         EV_grid, U_myopic = self.contraction_mapping(beta=self.beta,**self.states_def)
+        ##grid version
+        '''
         val_grid = U_myopic + self.beta*EV_grid
         pchoice_grid = self.choice_prob(val_grid)
-        
-        self.pchoice_grid = pchoice_grid
-        #Simulate share        
         pchoice_seq = pchoice_grid[:,S_real]
-        self.S_real=S_real
-        self.pchoice_seq=pchoice_seq
         '''
-        remain = np.zeros(self.nobs)
-        for i in range(0,self.nprod):
-            remain[self.prodid==i]=np.cumprod( np.append(1.,pchoice_seq[0,self.prodid==i]))[:-1]
-        self.remain=remain
-        share_seq = remain*pchoice_seq[1,:]
-        '''
+        ##sequence version        
+        EV_seq = EV_grid[:,S_real]
+        val_seq = np.c_[np.zeros(len(zeta_real)), zeta_real].T + self.beta* EV_seq
+        pchoice_seq = self.choice_prob(val_seq)
+        
+        
+        #Simulate share                
         share_obs = np.zeros(self.nobs)
         for i in range(self.nobs):
             if self.loc_firstobs[i]:
@@ -190,9 +188,14 @@ class SimulateDynShare:
             remain = remain-buy_obs
             share_obs[i] = buy_obs/self.N_cons
         self.share_obs = share_obs
+        valid_data = np.where(share_obs!=0)
+        self.valid_data=valid_data
         
-        self.data = {'prodid':self.prodid,'mktid':self.mktid,'loc_firstobs':self.loc_firstobs,'loc_lastobs':self.loc_lastobs,\
-        'states_def':self.states_def,'char':self.char,'share':share_obs}
+        self.data = {'prodid':self.prodid[valid_data],'mktid':self.mktid[valid_data],'loc_firstobs':self.loc_firstobs[valid_data],'loc_lastobs':self.loc_lastobs[valid_data],\
+        'states_def':self.states_def,'char':self.char[valid_data,:],'share':share_obs[valid_data]}
+        
+        self.data_unobs = {'S_real':S_real[valid_data],'zeta_real':zeta_real[valid_data],'phi':phi,'v_var':v_var,'EV_grid':EV_grid,\
+                           'U_myopic':U_myopic,'pchoice_seq':pchoice_seq[:,valid_data]}
 
         
        

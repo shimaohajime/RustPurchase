@@ -25,6 +25,15 @@ sim.Simulate()
 data = sim.data
 share = data['share']
 char = data['char']
+data_unobs = sim.data_unobs
+
+S_gridN=data['states_def']['S_gridN']
+S_gridmin=data['states_def']['S_gridmin']
+S_gridmax=data['states_def']['S_gridmax']
+S_grid=data['states_def']['S_grid']
+S_grid_bounds=data['states_def']['S_grid_bounds']
+S_gridsize=data['states_def']['S_gridsize']
+
 
 dpara_guess = np.array([.4,3.,.7])
 nu_var=1.
@@ -32,103 +41,199 @@ rho=8.
 beta=.75
 phi_guess = .9
 v_var_guess = .5
+class EstimateDynShare:
+    def __init__(self, data, S_gridN = 3,S_gridmin = -1.,S_gridmax = 1.,
+                 beta=.75, data_unobs=None):
+        
+        #state space
+        self.S_grid,self.S_gridsize = np.linspace(S_gridmin, S_gridmax, num=S_gridN, retstep=True)
+        self.S_grid_bounds = np.linspace(S_gridmin+self.S_gridsize/2, S_gridmax-self.S_gridsize/2,num=S_gridN-1)
+        self.S_setting ={ 'S_gridN':S_gridN,'S_gridmin':S_gridmin,'S_gridmax':S_gridmax,'S_grid':self.S_grid,\
+        'S_grid_bounds':self.S_grid_bounds,'S_gridsize':self.S_gridsize}
+        
+        #read data
+        self.share_obs = data['share']
+        self.char = data['char']
+        self.loc_firstobs = data['loc_firstobs']
+        self.loc_lastobs = data['loc_lastobs']
+        self.mktid = data['mktid']
+        self.prodid = data['prodid']
 
-def Gen_states_def(phi, v_var,S_gridN,S_gridmin,S_gridmax,S_grid,\
-    S_grid_bounds,S_gridsize):
-    v_dist = stats.norm(scale=np.sqrt(v_var))
-    S_trans_mat_cons = np.zeros([S_gridN,S_gridN])
-    for i in range(S_gridN):
-        for j in range(S_gridN):
-            s_current = S_grid[i]
-            s_next = S_grid[j]
-            s_diff = s_next-phi*s_current
-            if s_next==S_gridmin:
-                S_trans_mat_cons[i,j] = v_dist.cdf(s_diff+S_gridsize/2)-0.
-            elif s_next==S_gridmax:
-                S_trans_mat_cons[i,j] = 1.-v_dist.cdf(s_diff-S_gridsize/2)
-            else:
-                S_trans_mat_cons[i,j] = v_dist.cdf(s_diff+S_gridsize/2)-v_dist.cdf(s_diff-S_gridsize/2)
-                
-    states_def ={ 'S_gridN':S_gridN,'S_gridmin':S_gridmin,'S_gridmax':S_gridmax,'S_grid':S_grid,\
-    'S_grid_bounds':S_grid_bounds,'S_gridsize':S_gridsize,'S_trans_mat_cons':S_trans_mat_cons }
-    return states_def
+    def Gen_states_def(self,phi, v_var,S_gridN,S_gridmin,S_gridmax,S_grid,\
+        S_grid_bounds,S_gridsize):
+        v_dist = stats.norm(scale=np.sqrt(v_var))
+        S_trans_mat_cons = np.zeros([S_gridN,S_gridN])
+        
+        S_grid_lbound = np.append(-np.inf, S_grid_bounds)
+        S_grid_ubound = np.append(S_grid_bounds,np.inf)
+        S_trans_mat_cons=v_dist.cdf( S_grid_ubound-phi*S_grid.reshape([-1,1]) )- v_dist.cdf(S_grid_lbound-phi*S_grid.reshape([-1,1]))
+        '''
+        for i in range(S_gridN):
+            for j in range(S_gridN):
+                s_current = S_grid[i]
+                s_next = S_grid[j]
+                s_diff = s_next-phi*s_current
+                if s_next==S_gridmin:
+                    S_trans_mat_cons[i,j] = v_dist.cdf(s_diff+S_gridsize/2)-0.
+                elif s_next==S_gridmax:
+                    S_trans_mat_cons[i,j] = 1.-v_dist.cdf(s_diff-S_gridsize/2)
+                else:
+                    S_trans_mat_cons[i,j] = v_dist.cdf(s_diff+S_gridsize/2)-v_dist.cdf(s_diff-S_gridsize/2)
+        '''         
+        states_def ={ 'S_gridN':S_gridN,'S_gridmin':S_gridmin,'S_gridmax':S_gridmax,'S_grid':S_grid,\
+        'S_grid_bounds':S_grid_bounds,'S_gridsize':S_gridsize,'S_trans_mat_cons':S_trans_mat_cons }
+        return states_def
+    
+    def contraction_mapping(self,beta,\
+                            S_gridN,S_gridmin,S_gridmax,S_grid,\
+                            S_grid_bounds,S_gridsize,S_trans_mat_cons,\
+                            threshold=1e-6, maxiter=10e3):
+        achieved = True
+        k = 0
+        U_myopic = np.c_[np.zeros(S_gridN),S_grid].T
+        EV_new = np.c_[S_grid,np.zeros(S_gridN)].T
+        norm = threshold + 100.
+        while norm>threshold:
+            EV = EV_new
+            val = U_myopic + beta*EV
+            expval = np.exp(val)
+            v0 = np.log( np.sum( expval, axis=0 ) )
+            v1 = np.zeros(S_gridN)
+            val_f = np.c_[v0,v1].T #EV in each future state
+            EV_new =  np.dot( S_trans_mat_cons, val_f.T).T #assuming the transition is same across action.
+            k=k+1
+            if k>maxiter:
+                achieved=False
+                break
+            norm = np.max(np.abs(EV_new - EV))
+        return EV_new, U_myopic
 
-
-
-def contraction_mapping(beta,\
-                        S_gridN,S_gridmin,S_gridmax,S_grid,\
-                        S_grid_bounds,S_gridsize,S_trans_mat_cons,\
-                        threshold=1e-6, maxiter=10e3):
-    achieved = True
-    k = 0
-    U_myopic = np.c_[np.zeros(S_gridN),S_grid].T
-    EV_new = np.c_[S_grid,np.zeros(S_gridN)].T
-    norm = threshold + 100.
-    while norm>threshold:
-        EV = EV_new
-        val = U_myopic + beta*EV
+    def choice_prob(self,val): #input 2 by S_gridN matrix
+        n,s = val.shape
         expval = np.exp(val)
-        v0 = np.log( np.sum( expval, axis=0 ) )
-        v1 = np.zeros(S_gridN)
-        val_f = np.c_[v0,v1].T #EV in each future state
-        EV_new =  np.dot( S_trans_mat_cons, val_f.T).T #assuming the transition is same across action.
-        k=k+1
-        if k>maxiter:
-            achieved=False
-            break
-        norm = np.max(np.abs(EV_new - EV))
-    return EV_new, U_myopic
+        expval_sum = np.tile(  np.sum(expval, axis=0), n).reshape([n,s])
+        p_choice = expval/expval_sum
+        return p_choice
 
-def Calc_share_hat(zeta_seq, zeta_grid, EV_grid, beta):
-    nobs = len(zeta_seq)
-    val_grid = np.c_[np.zeros(nobs), zeta_grid] + beta*EV_grid
-    pchoice_grid = choice_prob(val_grid)
-    pchoice_seq = pchoice_grid[:,zeta_seq]
-    
-    share_hat = np.zeros(nobs)
-    for i in range(nobs):
-        if loc_firstobs[i]:
-            remain = 1.
-        share_hat = remain*pchoice_seq[1,i]
-        remain = remain-share_obs
-    return share_hat
-    
-def choice_prob(val): #input 2 by S_gridN matrix
-    n,s = val.shape
-    expval = np.exp(val)
-    expval_sum = np.tile(  np.sum(expval, axis=0), n).reshape([n,s])
-    p_choice = expval/expval_sum
-    return p_choice
+    def Calc_share_hat(self,zeta_seq, S_grid, S_grid_bounds , EV_grid, beta):
+        nobs = len(zeta_seq)
+        '''
+        val_grid = np.c_[np.zeros(len(S_grid)),S_grid].T + beta*EV_grid
+        pchoice_grid = choice_prob(val_grid)
+        S_seq = np.digitize( zeta_seq, self.S_grid_bounds ).astype(int)
+        pchoice_seq = pchoice_grid[:,S_seq]
+        '''
+        S_seq = np.digitize( zeta_seq, S_grid_bounds ).astype(int)
+        EV_seq = EV_grid[:,S_seq]
+        val_seq = np.c_[np.zeros(len(zeta_seq)), zeta_seq].T + beta* EV_seq
+        pchoice_seq = self.choice_prob(val_seq)
+        share_hat = np.zeros(nobs)
+        '''
+        for i in range(nobs):
+            if loc_firstobs[i]:
+                remain = 1.
+            share_hat[i] = remain*pchoice_seq[1,i]
+            remain = remain-share_hat[i]
+        '''
+        for i in range(self.nprod):
+            remain = np.cumprod( np.append(1., pchoice_seq[0,self.prodid==i]) )[:-1]
+            share_hat[self.prodid==i] = remain*pchoice_seq[1,self.prodid==i]
+        return share_hat
+
+    def FP_zeta(self,beta,share_obs, phi_guess, v_var_guess,\
+                EV_grid,
+                S_gridN,S_gridmin,S_gridmax,S_grid,S_grid_bounds,S_gridsize,\
+                threshold=1e-6, maxiter=10e3,step=.05):
+        nobs = len(share_obs)
+        zeta_hat = 1.*np.ones(nobs)
+        zeta_hat_new = 1.*np.ones(nobs)
+        norm = 100.
+        k=0
+        while norm>threshold:    
+            zeta_hat = zeta_hat_new
+            share_hat = self.Calc_share_hat(zeta_hat,S_grid, S_grid_bounds, EV_grid, beta)
+            if np.any(share_hat==0):
+                zeta_hat[np.where(share_hat==0)]=zeta_hat[np.where(share_hat==0)]+.0001
+                share_hat = self.Calc_share_hat(zeta_hat,S_grid, S_grid_bounds, EV_grid, beta)            
+            update = step*( np.log(share_obs)-np.log(share_hat) )
+            zeta_hat_new = zeta_hat+update
+            norm = np.max( np.abs(zeta_hat_new-zeta_hat) )
+            k=k+1
+        return zeta_hat
+
+    def Unpdate_phi(self,zeta_seq,x,iv_phi):
+        nobs=len(zeta_seq)
+        phi, f = self.tsls_1d(x=x,y=zeta_seq,iv=iv_phi)
+        eta = zeta_seq-phi*x
+        return phi, eta
 
 
-def FP_zeta(share_obs, phi_guess, v_var_guess,\
-            EV_grid,
-            S_gridN,S_gridmin,S_gridmax,S_grid,S_grid_bounds,S_gridsize,\
-            beta,\
-            threshold=1e-6, maxiter=10e3):
-    nobs = len(share_obs)
-    zeta_hat = 5.*np.ones(nobs)
-    zeta_hat_new = 5.*np.ones(nobs)
-    norm = 100.
-    while norm>threshold:    
-        zeta_hat = zeta_hat_new
-        share_hat = Calc_share_hat(zeta_hat,S_grid, EV_grid, beta)
-        update = np.log(share_obs)-np.log(share_hat)
-        zeta_hat_new = zeta_hat+update
-        norm = np.max( np.abs(zeta_hat_new-zeta_hat) )
-    return zeta_hat
-
-def Unpdate_phi():
-    pass
-
-def Calc_eta():
-    pass
-
-def Calc_nu():
-    pass
+    def Update_rho(self,eta_seq):
+        nobs=len(eta_seq)
+        x = eta_seq[~self.loc_lastobs]
+        y = eta_seq[~self.loc_firstobs]
+        '''
+        if iv_rho.shape[0]==nobs:
+            iv_rho = iv_rho[~self.loc_lastobs,:]
+        rho, f = self.tsls_1d(x,y,iv_rho)
+        '''
+        lr1=linear_model.LinearRegression(fit_intercept=False)
+        lr1.fit(x,y)
+        rho = lr1.coef_
+        nu = y-rho*x
+        return rho, nu
+        
+    def tsls_1d(self,x,y,iv):    
+        nobs = len(y)
+        x=x.reshape([nobs,-1])
+        y=y.reshape([nobs,-1])
+        z = np.c_[x, iv]
+        N_inst = z.shape[1]
+        invA = np.linalg.solve( np.dot(z.T,z), np.identity(N_inst) )
+        temp1 = np.dot(x.T,z)
+        temp2 = np.dot(y.T,z)
+        temp3 = np.dot(np.dot(temp1,invA),temp1.T) #x'z(z'z)^{-1}z'x
+        temp4 = np.dot(np.dot(temp1,invA),temp2.T) #x'z(z'z)^{-1}z'y
+        bhat = temp4/temp3
+        gmmresid = y - np.dot(x, bhat)
+        temp5=np.dot(gmmresid.T, z)
+        f=np.dot(np.dot(temp5/nobs, invA),(temp5.T)/nobs)
+        return bhat, f
     
+    def Calc_gmm(self, nu, iv_nu, W=None):
+        n_nu = len(nu)
+        nu=nu.reshape([n_nu,-1])
+        nu_fd = nu[1:]-nu[:-1]
+        iv_nu_lagged = iv_nu[1:,:]
+        nu_comb = np.vstack((nu,nu_fd) )
+        iv_comb = np.vstack( (iv_nu, iv_nu_lagged) )
+        n_iv = iv_comb.shape[1]
+        if W is None:
+            W = np.linalg.solve( np.dot(iv_comb.T,iv_comb), np.identity(n_iv) )
+        temp1 = np.dot(nu_comb.T, iv_comb)
+        gmm = np.dot( np.dot( temp1, W ), temp1.T)
+        return gmm
     
+    def Create_iv_nu(zeta_seq):
+        
+        return iv_nu
+        
+    def make_gmmobj(self):
+        def gmmobj(para):
+            phi_guess = para[0]
+            v_var_guess = para[1]
+            states_def = self.Gen_states_def(phi=phi_guess, v_var=v_var_guess,**self.S_setting)
+            EV_grid,U_myopic = self.contraction_mapping(beta=self.beta,**states_def)
+            zeta_hat = self.FP_zeta(share_obs=self.share_obs, phi_guess=phi_guess, v_var_guess=v_var_guess,\
+                                    EV_grid=EV_grid, beta=self.beta, **self.S_setting)
+            phi_guess,eta_seq = self.Update_phi(zeta_seq=zeta_hat,x=self.char,iv_phi=self.iv_phi)
+            iv_rho = self.Create_iv_rho(zeta_seq=zeta_hat)
+            rho_guess, nu_seq = self.Update_rho(eta_seq=eta_seq)
+            f = self.Calc_gmm(nu,iv_nu=iv_nu)
+            return f
+        return gmmobj
     
-    
-    
-    
+    def fit(self):
+        self.iv_phi = 
+        
+        
